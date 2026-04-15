@@ -5,7 +5,10 @@ export const createNewLead = async (req, res) => {
     const { 
       customerName, 
       phoneNumber, 
-      location, 
+      area,
+      gpsCoordinates,
+      state,
+      district,
       budget, 
       productInterest 
     } = req.body;
@@ -13,7 +16,7 @@ export const createNewLead = async (req, res) => {
     // Extract the ID of the employee who is currently logged in
     const employeeId = req.user.userId; 
 
-    if (!customerName || !phoneNumber || !location || !budget || !productInterest) {
+    if (!customerName || !phoneNumber || !area || !budget || !productInterest) {
       return res.status(400).json({
         success: false,
         message: "Please provide all required fields." 
@@ -23,7 +26,10 @@ export const createNewLead = async (req, res) => {
     const newLead = await Lead.create({
       customerName,
       phoneNumber,
-      location,
+      location: area,
+      gpsCoordinates: gpsCoordinates || '',
+      state: state || '',
+      district: district || '',
       budget,
       productInterest,
       createdBy: employeeId, 

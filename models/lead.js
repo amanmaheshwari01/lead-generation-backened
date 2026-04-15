@@ -16,6 +16,18 @@ const leadSchema = new mongoose.Schema({
     required: [true, 'Location or Zip Code is required'],
     trim: true,
   },
+  gpsCoordinates: {
+    type: String,
+    trim: true,
+  },
+  state: {
+    type: String,
+    trim: true,
+  },
+  district: {
+    type: String,
+    trim: true,
+  },
   budget: {
     type: Number,
     required: [true, 'Estimated budget is required'],
