@@ -3,20 +3,27 @@ import express from 'express'
 import helmet from 'helmet'
 import cors from 'cors'
 import rateLimit from 'express-rate-limit'
+import path from 'path'
+import { fileURLToPath } from 'url'
 import { connectDB } from './config/db.js'
 import userRoutes from './routes/userRoutes.js'
 import employeeRouter from './routes/employeeRoutes.js'
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 
 app.use(helmet());
 
-app.use(cors({
-  origin: process.env.FRONTEND_URL || 'https://lead-generation2-silk.vercel.app',
-  credentials: true
-}));
+// Allow all origins — CORS is handled via Next.js rewrites (proxy)
+app.use(cors());
 
 app.use(express.json());
+
+// EJS setup
+app.set('view engine', 'ejs');
+app.set('views', path.join(__dirname, 'views'));
 
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
@@ -43,6 +50,15 @@ app.use(async (req, res, next) => {
     console.error('Database connection error:', error);
     res.status(500).json({ message: 'Database connection failed' });
   }
+});
+
+// Home route — EJS page
+app.get('/', (req, res) => {
+  res.render('index', {
+    title: 'Lead Generation API',
+    status: 'Running',
+    timestamp: new Date().toLocaleString()
+  });
 });
 
 app.use('/user', userRoutes);
