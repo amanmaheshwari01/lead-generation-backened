@@ -12,7 +12,7 @@ const app = express();
 app.use(helmet());
 
 app.use(cors({
-  origin: process.env.FRONTEND_URL  || 'https://lead-generation2-silk.vercel.app/',
+  origin: process.env.FRONTEND_URL || 'https://lead-generation2-silk.vercel.app',
   credentials: true
 }));
 
@@ -25,13 +25,36 @@ const limiter = rateLimit({
 });
 app.use('/api', limiter);
 
-await connectDB(); 
+// Connect to DB (with caching for serverless cold starts)
+let isConnected = false;
+const ensureDbConnected = async () => {
+  if (!isConnected) {
+    await connectDB();
+    isConnected = true;
+  }
+};
+
+// Middleware to ensure DB connection before handling requests
+app.use(async (req, res, next) => {
+  try {
+    await ensureDbConnected();
+    next();
+  } catch (error) {
+    console.error('Database connection error:', error);
+    res.status(500).json({ message: 'Database connection failed' });
+  }
+});
 
 app.use('/user', userRoutes);
 app.use('/employee', employeeRouter);
 
-const PORT = process.env.PORT || 5000;
- 
-app.listen(process.env.PORT, ()=>{
-    console.log(`Server running on port ${process.env.PORT}`);
-})
+// For local development
+if (process.env.NODE_ENV !== 'production') {
+  const PORT = process.env.PORT || 5000;
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
+}
+
+// Export for Vercel serverless
+export default app;
