@@ -9,6 +9,7 @@ export const createNewLead = async (req, res) => {
       gpsCoordinates,
       state,
       district,
+      city,
       budget, 
       productInterest 
     } = req.body;
@@ -16,10 +17,10 @@ export const createNewLead = async (req, res) => {
     // Extract the ID of the employee who is currently logged in
     const employeeId = req.user.userId; 
 
-    if (!customerName || !phoneNumber || !area || !budget || !productInterest) {
+    if (!customerName || !phoneNumber) {
       return res.status(400).json({
         success: false,
-        message: "Please provide all required fields." 
+        message: "Customer Name and Phone Number are required." 
       });
     }
 
@@ -30,6 +31,7 @@ export const createNewLead = async (req, res) => {
       gpsCoordinates: gpsCoordinates || '',
       state: state || '',
       district: district || '',
+      city: city || '',
       budget,
       productInterest,
       createdBy: employeeId, 

@@ -13,7 +13,6 @@ const leadSchema = new mongoose.Schema({
   },
   location: {
     type: String,
-    required: [true, 'Location or Zip Code is required'],
     trim: true,
   },
   gpsCoordinates: {
@@ -28,14 +27,16 @@ const leadSchema = new mongoose.Schema({
     type: String,
     trim: true,
   },
+  city: {
+    type: String,
+    trim: true,
+  },
   budget: {
     type: Number,
-    required: [true, 'Estimated budget is required'],
     min: [0, 'Budget cannot be a negative number'],
   },
   productInterest: {
-    type: String,
-    required: [true, 'Product interest is required'],
+    type: [String],
     trim: true,
   },
 
