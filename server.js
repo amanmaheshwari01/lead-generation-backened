@@ -12,7 +12,7 @@ const app = express();
 app.use(helmet());
 
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'https://lead-generation2-silk.vercel.app/',
+  origin: process.env.FRONTEND_URL  || 'https://lead-generation2-silk.vercel.app/',
   credentials: true
 }));
 
