@@ -70,12 +70,13 @@ export const registerUser = async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, salt);
 
     // 3. Logic to determine shopId and role
-    // If a Shop Admin is registering, the new user MUST be an Employee for their shop
+    // If a Shop Admin is registering, they can create an Employee or another Shop Admin for their shop
     let finalRole = role || 'Employee';
     let finalShopId = null;
 
     if (creatorRole === 'Shop Admin') {
-      finalRole = 'Employee';
+      // Respect provided role but only allow 'Employee' or 'Shop Admin' for their own shop
+      if (role !== 'Shop Admin') finalRole = 'Employee';
       finalShopId = creatorShopId;
     } else if (creatorRole === 'Super Admin') {
       finalShopId = req.body.shopId || null;
@@ -225,7 +226,9 @@ export const getEmployees = async (req, res) => {
       return res.status(403).json({ success: false, message: "Unauthorized: Only Admins can view employees." });
     }
 
-    const query = role === 'Super Admin' ? { role: 'Employee' } : { shopId, role: 'Employee' };
+    // Query for all users in this shop, excluding the super admin (unless they are one)
+    // We include BOTH Employees and Shop Admins so the owner can manage all staff
+    const query = role === 'Super Admin' ? {} : { shopId };
     
     const employees = await User.find(query).select("-passwordHash");
 
@@ -268,5 +271,48 @@ export const deleteEmployee = async (req, res) => {
   } catch (error) {
     console.error("Delete Employee Error:", error.message);
     res.status(500).json({ success: false, message: "Failed to delete employee" });
+  }
+};
+
+export const updateUserRole = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { role: newRole } = req.body;
+    const { role: creatorRole, shopId, userId: creatorId } = req.user;
+
+    // Prevent self-role change
+    if (id === creatorId.toString()) {
+      return res.status(400).json({ success: false, message: "You cannot change your own role." });
+    }
+
+    if (!['Employee', 'Shop Admin'].includes(newRole)) {
+      return res.status(400).json({ success: false, message: "Invalid role specified." });
+    }
+
+    const userToUpdate = await User.findById(id);
+    if (!userToUpdate) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    // Permission Check
+    if (creatorRole === 'Shop Admin') {
+      if (!userToUpdate.shopId || userToUpdate.shopId.toString() !== shopId.toString()) {
+        return res.status(403).json({ success: false, message: "Unauthorized: Access denied to this shop's data." });
+      }
+    } else if (creatorRole !== 'Super Admin') {
+      return res.status(403).json({ success: false, message: "Unauthorized" });
+    }
+
+    userToUpdate.role = newRole;
+    await userToUpdate.save();
+
+    res.status(200).json({
+      success: true,
+      message: `Role updated to ${newRole} successfully`,
+      role: newRole
+    });
+  } catch (error) {
+    console.error("Update User Role Error:", error.message);
+    res.status(500).json({ success: false, message: "Failed to update user role" });
   }
 };
