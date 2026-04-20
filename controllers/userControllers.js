@@ -1,5 +1,6 @@
 import User from "../models/user.js";
-import "../models/shop.js"; // Register Shop model for populate
+import Lead from "../models/lead.js";
+import Shop from "../models/shop.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 
@@ -56,26 +57,41 @@ export const userLogin = async (req, res) => {
 export const registerUser = async (req, res) => {
   try {
     const { name, email, password, role } = req.body;
+    const { role: creatorRole, shopId: creatorShopId } = req.user;
 
     // 1. Check if this email is already registered
     const existingUser = await User.findOne({ email });
     if (existingUser) {
-      return res.status(400).json({ message: "This user is already registered." });
+      return res.status(400).json({ success: false, message: "This email is already registered." });
     }
 
-    // 2. Encrypt (Hash) the password so hackers can't read it in the database
+    // 2. Encrypt (Hash) the password
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    // 3. Save the new user to MongoDB
+    // 3. Logic to determine shopId and role
+    // If a Shop Admin is registering, the new user MUST be an Employee for their shop
+    let finalRole = role || 'Employee';
+    let finalShopId = null;
+
+    if (creatorRole === 'Shop Admin') {
+      finalRole = 'Employee';
+      finalShopId = creatorShopId;
+    } else if (creatorRole === 'Super Admin') {
+      finalShopId = req.body.shopId || null;
+    }
+
+    // 4. Save the new user to MongoDB
     const newUser = await User.create({
       name,
       email,
-      password: hashedPassword,
-      role: role || 'employee' // Default to employee if no role is provided
+      passwordHash: hashedPassword,
+      role: finalRole,
+      shopId: finalShopId
     });
 
     res.status(201).json({
+      success: true,
       message: "User created successfully!",
       user: {
         id: newUser._id,
@@ -87,7 +103,7 @@ export const registerUser = async (req, res) => {
 
   } catch (error) {
     console.error("Registration Error:", error);
-    res.status(500).json({ message: "An error occurred while creating the user." });
+    res.status(500).json({ success: false, message: "An error occurred while creating the user." });
   }
 };
 
@@ -95,11 +111,18 @@ export const getProfile = async (req, res) => {
   try {
     const user = await User.findById(req.user.userId)
       .select("-passwordHash")
-      .populate("shopId", "name");
+      .populate("shopId", "name products");
 
     if (!user) {
       return res.status(404).json({ success: false, message: "User not found" });
     }
+
+    // Contextual lead count based on strict RBAC tier
+    const leadCountQuery = req.user.role === 'Shop Admin' && req.user.shopId
+      ? { shopId: req.user.shopId } // Admins see all leads for their shop tenant
+      : { createdBy: req.user.userId, shopId: req.user.shopId }; // Employees only see their own
+      
+    const leadCount = await Lead.countDocuments(leadCountQuery);
 
     res.status(200).json({
       success: true,
@@ -109,6 +132,8 @@ export const getProfile = async (req, res) => {
         email: user.email,
         role: user.role,
         shop: user.shopId ? user.shopId.name : null,
+        shopProducts: user.shopId ? user.shopId.products : [],
+        leadCount,
       },
     });
   } catch (error) {
@@ -134,11 +159,18 @@ export const updateProfile = async (req, res) => {
       userId,
       { ...(name && { name }), ...(email && { email }) },
       { new: true, runValidators: true }
-    ).select("-passwordHash").populate("shopId", "name");
+    ).select("-passwordHash").populate("shopId", "name products");
 
     if (!updatedUser) {
       return res.status(404).json({ success: false, message: "User not found" });
     }
+
+    // Contextual lead count based on strict RBAC tier
+    const leadCountQuery = req.user.role === 'Shop Admin' && req.user.shopId
+      ? { shopId: req.user.shopId } // Admins see all leads for their shop tenant
+      : { createdBy: userId, shopId: req.user.shopId }; // Employees only see their own
+      
+    const leadCount = await Lead.countDocuments(leadCountQuery);
 
     res.status(200).json({
       success: true,
@@ -149,10 +181,92 @@ export const updateProfile = async (req, res) => {
         email: updatedUser.email,
         role: updatedUser.role,
         shop: updatedUser.shopId ? updatedUser.shopId.name : null,
+        shopProducts: updatedUser.shopId ? updatedUser.shopId.products : [],
+        leadCount,
       },
     });
   } catch (error) {
     console.error("Update Profile Error:", error.message);
     res.status(500).json({ success: false, message: "Failed to update profile" });
+  }
+};
+
+export const updateShopProducts = async (req, res) => {
+  try {
+    const { products } = req.body;
+    const { shopId } = req.user;
+
+    if (!shopId) {
+      return res.status(403).json({ success: false, message: "No shop associated with this user" });
+    }
+
+    const updatedShop = await Shop.findByIdAndUpdate(
+      shopId,
+      { products },
+      { new: true }
+    );
+
+    res.status(200).json({
+      success: true,
+      message: "Shop products updated successfully",
+      products: updatedShop.products,
+    });
+  } catch (error) {
+    console.error("Update Shop Products Error:", error.message);
+    res.status(500).json({ success: false, message: "Failed to update shop products" });
+  }
+};
+
+export const getEmployees = async (req, res) => {
+  try {
+    const { shopId, role } = req.user;
+
+    if (role !== 'Shop Admin' && role !== 'Super Admin') {
+      return res.status(403).json({ success: false, message: "Unauthorized: Only Admins can view employees." });
+    }
+
+    const query = role === 'Super Admin' ? { role: 'Employee' } : { shopId, role: 'Employee' };
+    
+    const employees = await User.find(query).select("-passwordHash");
+
+    res.status(200).json({
+      success: true,
+      employees
+    });
+  } catch (error) {
+    console.error("Get Employees Error:", error.message);
+    res.status(500).json({ success: false, message: "Failed to fetch employees" });
+  }
+};
+
+export const deleteEmployee = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { shopId, role } = req.user;
+
+    const userToDelete = await User.findById(id);
+
+    if (!userToDelete) {
+      return res.status(404).json({ success: false, message: "Employee not found" });
+    }
+
+    // Check permissions: Shop Admin can only delete from their own shop
+    if (role === 'Shop Admin') {
+      if (!userToDelete.shopId || userToDelete.shopId.toString() !== shopId.toString()) {
+        return res.status(403).json({ success: false, message: "Unauthorized: You can only delete employees from your own shop." });
+      }
+    } else if (role !== 'Super Admin') {
+      return res.status(403).json({ success: false, message: "Unauthorized" });
+    }
+
+    await User.findByIdAndDelete(id);
+
+    res.status(200).json({
+      success: true,
+      message: "Employee deleted successfully"
+    });
+  } catch (error) {
+    console.error("Delete Employee Error:", error.message);
+    res.status(500).json({ success: false, message: "Failed to delete employee" });
   }
 };

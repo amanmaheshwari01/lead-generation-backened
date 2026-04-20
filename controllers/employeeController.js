@@ -1,4 +1,5 @@
 import Lead from '../models/lead.js';
+import User from '../models/user.js'; // Required for .populate('createdBy') to work reliably
 
 export const createNewLead = async (req, res) => {
   try {
@@ -14,8 +15,16 @@ export const createNewLead = async (req, res) => {
       productInterest 
     } = req.body;
 
-    // Extract the ID of the employee who is currently logged in
+    // Extract the ID and securely bound shop of the employee who is currently logged in
     const employeeId = req.user.userId; 
+    const shopId = req.user.shopId;
+
+    if (!shopId) {
+      return res.status(403).json({
+        success: false,
+        message: "Access Denied: You must be associated with a Shop to create leads."
+      });
+    }
 
     if (!customerName || !phoneNumber) {
       return res.status(400).json({
@@ -35,6 +44,7 @@ export const createNewLead = async (req, res) => {
       budget,
       productInterest,
       createdBy: employeeId, 
+      shopId,
     });
     console.log("new Lead is : ", newLead);
     res.status(201).json({
@@ -63,56 +73,42 @@ export const createNewLead = async (req, res) => {
 
 export const getMyLeads = async (req, res) => {
   try {
-    // 1. Grab the employee's ID from the verified token
-    const employeeId = req.user.userId;
+    const { userId, shopId, role } = req.user;
 
-    // 2. Find all leads created by this employee
-    const leads = await Lead.find({ createdBy: employeeId }).sort({ createdAt: -1 });
+    // 1. Build query intelligently based on RBAC role
+    let query = {};
+    
+    if (role === 'Super Admin') {
+      // Super Admin should ideally see everything globally
+      query = {};
+    } else if (role === 'Shop Admin') {
+      // Shop Admins see all leads for their specific shop tenant
+      if (!shopId) throw new Error("Shop Admin must have an associated shopId");
+      query = { shopId };
+    } else {
+      // Employees see ONLY their own leads, strictly bound to their shop
+      if (!shopId) throw new Error("Employee must have an associated shopId");
+      query = { createdBy: userId, shopId };
+    }
 
-    // 3. Send them back to the frontend
+    // 2. Fetch with population and logging for debug
+    const leads = await Lead.find(query)
+      .populate('createdBy', 'name')
+      .sort({ createdAt: -1 });
+
     res.status(200).json({
       success: true,
       leads: leads
     });
 
   } catch (error) {
-    console.error("Error fetching leads:", error);
+    console.error("Backend Error [getMyLeads]:", error.message);
     res.status(500).json({
       success: false,
-      message: "An error occurred while fetching your leads."
+      message: error.message || "An error occurred while fetching your leads."
     });
   }
 };
 
-export const updateLeadStatus = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { status } = req.body; 
-    const employeeId = req.user.userId;
 
-    // Security Check: Find the lead AND make sure this employee owns it
-    const updatedLead = await Lead.findOneAndUpdate(
-      { _id: id, createdBy: employeeId }, 
-      { status: status },
-      { new: true } // Tells Mongoose to return the newly updated document
-    );
-
-    if (!updatedLead) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "Lead not found or you do not have permission to edit it." 
-      });
-    }
-
-    res.status(200).json({
-      success: true,
-      message: "Status updated successfully!",
-      lead: updatedLead
-    });
-
-  } catch (error) {
-    console.error("Error updating status:", error);
-    res.status(500).json({ success: false, message: "Server error updating status." });
-  }
-};
 

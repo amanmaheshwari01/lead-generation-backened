@@ -34,11 +34,18 @@ app.use('/api', limiter);
 
 // Connect to DB (with caching for serverless cold starts)
 let isConnected = false;
+let connectPromise = null;
+
 const ensureDbConnected = async () => {
-  if (!isConnected) {
-    await connectDB();
-    isConnected = true;
+  if (isConnected) return;
+  
+  if (!connectPromise) {
+    connectPromise = connectDB().then(() => {
+      isConnected = true;
+    });
   }
+  
+  await connectPromise;
 };
 
 // Middleware to ensure DB connection before handling requests

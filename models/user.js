@@ -8,4 +8,4 @@ const UserSchema = new mongoose.Schema({
   shopId: { type: mongoose.Schema.Types.ObjectId, ref: 'Shop' },
 });
 
-export default mongoose.model("user", UserSchema);
+export default mongoose.model("User", UserSchema);

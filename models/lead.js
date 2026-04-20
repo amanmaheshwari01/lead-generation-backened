@@ -46,11 +46,14 @@ const leadSchema = new mongoose.Schema({
     ref: 'User', 
     required: true,
   },
-  status: {
-    type: String,
-    enum: ['New', 'Contacted', 'In Progress', 'Closed Won', 'Closed Lost'], 
-    default: 'New'
-  }
+
+  shopId: {
+    // This securely logically isolates the lead data to the shop tenant
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Shop',
+    required: true,
+  },
+
 }, {
   // Automatically creates 'createdAt' and 'updatedAt' timestamps!
   timestamps: true 
