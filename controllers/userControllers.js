@@ -3,6 +3,7 @@ import Lead from "../models/lead.js";
 import Shop from "../models/shop.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import pluralize from "pluralize";
 
 export const userLogin = async (req, res) => {
   try {
@@ -31,18 +32,47 @@ export const userLogin = async (req, res) => {
       shopId: user.shopId, // This will be null for Super Admins, but required for others
     };
 
-    // 4. Sign and generate the token
-    const token = jwt.sign(
+    // 4. Sign and generate tokens
+    const accessToken = jwt.sign(
       payload,
       process.env.JWT_SECRET || "fallback_secret_key_change_in_production",
-      { expiresIn: "120m" },
+      { expiresIn: "15m" },
     );
 
-    // 5. Send the token and role back to the frontend
+    const refreshToken = jwt.sign(
+      payload,
+      process.env.REFRESH_TOKEN_SECRET || "fallback_refresh_secret",
+      { expiresIn: "7d" },
+    );
+
+    // 5. Store refresh token in user document
+    user.refreshToken = refreshToken;
+    await user.save();
+
+    // 6. Set Tokens in HttpOnly Cookies
+    const isProd = process.env.NODE_ENV === 'production';
+    const cookieOptions = {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: isProd ? 'none' : 'lax',
+      path: '/',
+    };
+
+    console.log(`[AUTH] Setting cookies for: ${user.email} (Prod: ${isProd})`);
+    res.cookie('accessToken', accessToken, {
+      ...cookieOptions,
+      maxAge: 15 * 60 * 1000 // 15 minutes
+    });
+
+    res.cookie('refreshToken', refreshToken, {
+      ...cookieOptions,
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+    });
+
+    // 7. Send the role and status back to the frontend
     res.status(200).json({
       success: true,
       message: "Login successful",
-      token,
       role: user.role,
     });
   } catch (error) {
@@ -201,9 +231,15 @@ export const updateShopProducts = async (req, res) => {
       return res.status(403).json({ success: false, message: "No shop associated with this user" });
     }
 
+    // Normalize products to singular form
+    const normalizedProducts = products.map(p => ({
+      ...p,
+      productName: pluralize.plural(p.productName.trim())
+    }));
+
     const updatedShop = await Shop.findByIdAndUpdate(
       shopId,
-      { products },
+      { products: normalizedProducts },
       { new: true }
     );
 
@@ -314,5 +350,109 @@ export const updateUserRole = async (req, res) => {
   } catch (error) {
     console.error("Update User Role Error:", error.message);
     res.status(500).json({ success: false, message: "Failed to update user role" });
+  }
+};
+
+export const debugCookies = (req, res) => {
+  res.json({
+    hasAccessToken: !!req.cookies.accessToken,
+    hasRefreshToken: !!req.cookies.refreshToken,
+    cookieNames: Object.keys(req.cookies || {})
+  });
+};
+
+export const refreshAccessToken = async (req, res) => {
+  try {
+    const refreshToken = req.cookies.refreshToken;
+    console.log("Refresh attempt. Cookies received:", Object.keys(req.cookies));
+    
+    if (!refreshToken) {
+      console.warn("Refresh failed: No refreshToken cookie found in request.");
+      return res.status(401).json({ success: false, message: "No refresh token provided" });
+    }
+
+    const user = await User.findOne({ refreshToken });
+    if (!user) {
+      console.warn("Refresh failed: Token not found in database.");
+      return res.status(403).json({ success: false, message: "Invalid refresh token" });
+    }
+
+    // Verify token
+    jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET || "fallback_refresh_secret", async (err, decoded) => {
+      if (err) {
+        console.error("JWT Verify Error on Refresh:", err.message);
+        return res.status(401).json({ success: false, message: "Session expired. Please log in again." });
+      }
+      
+      const payload = { userId: user._id, role: user.role, shopId: user.shopId };
+
+      const accessToken = jwt.sign(
+        payload,
+        process.env.JWT_SECRET || "fallback_secret_key_change_in_production",
+        { expiresIn: "15m" }
+      );
+
+      const newRefreshToken = jwt.sign(
+        payload,
+        process.env.REFRESH_TOKEN_SECRET || "fallback_refresh_secret",
+        { expiresIn: "7d" }
+      );
+
+      // Save the new one
+      user.refreshToken = newRefreshToken;
+      await user.save();
+
+      // Set the new tokens in cookies
+      const isProd = process.env.NODE_ENV === 'production';
+      const cookieOptions = {
+        httpOnly: true,
+        secure: isProd,
+        sameSite: isProd ? 'none' : 'lax',
+        path: '/'
+      };
+
+      res.cookie('accessToken', accessToken, {
+        ...cookieOptions,
+        maxAge: 15 * 60 * 1000
+      });
+
+      res.cookie('refreshToken', newRefreshToken, {
+        ...cookieOptions,
+        maxAge: 7 * 24 * 60 * 60 * 1000
+      });
+
+      console.log(`[AUTH] Refreshed tokens for user: ${user.email}`);
+      res.status(200).json({
+        success: true,
+        message: "Token refreshed successfully"
+      });
+    });
+  } catch (error) {
+    console.error("Refresh Token Error:", error.message);
+    res.status(500).json({ success: false, message: "Failed to refresh token" });
+  }
+};
+
+export const logoutUser = async (req, res) => {
+  try {
+    const refreshToken = req.cookies.refreshToken;
+    if (refreshToken) {
+      const user = await User.findOneAndUpdate({ refreshToken }, { $unset: { refreshToken: 1 } });
+    }
+    
+    const cookieOptions = {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/'
+    };
+
+    res.clearCookie('accessToken', cookieOptions);
+    res.clearCookie('refreshToken', cookieOptions);
+    
+    res.status(200).json({ success: true, message: "Logged out successfully" });
+  } catch (error) {
+    console.error("Logout Error:", error.message);
+    res.status(500).json({ success: false, message: "Failed to logout" });
   }
 };
