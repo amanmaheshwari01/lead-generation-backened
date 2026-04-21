@@ -3,6 +3,7 @@ import express from 'express'
 import helmet from 'helmet'
 import cors from 'cors'
 import rateLimit from 'express-rate-limit'
+import cookieParser from 'cookie-parser'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { connectDB } from './config/db.js'
@@ -16,10 +17,24 @@ const app = express();
 
 app.use(helmet());
 
-// Allow all origins — CORS is handled via Next.js rewrites (proxy)
-app.use(cors());
+// Allow credentials for cookie-based authentication
+app.use(cors({
+  origin: true, 
+  credentials: true
+}));
 
 app.use(express.json());
+app.use(cookieParser());
+
+// Debug Middleware: Log incoming requests to verify cookie transmission
+app.use((req, res, next) => {
+  if (req.path.startsWith('/user')) {
+    console.log(`[DEBUG] ${req.method} ${req.path}`);
+    console.log(`[AUTH] Cookies present:`, Object.keys(req.cookies || {}));
+    console.log(`[AUTH] Refresh Token exists:`, !!req.cookies.refreshToken);
+  }
+  next();
+});
 
 // EJS setup
 app.set('view engine', 'ejs');
