@@ -36,7 +36,7 @@ export const userLogin = async (req, res) => {
     const accessToken = jwt.sign(
       payload,
       process.env.JWT_SECRET || "fallback_secret_key_change_in_production",
-      { expiresIn: "15m" },
+      { expiresIn: "1d" },
     );
 
     const refreshToken = jwt.sign(
@@ -58,10 +58,9 @@ export const userLogin = async (req, res) => {
       path: '/',
     };
 
-    console.log(`[AUTH] Setting cookies for: ${user.email} (Prod: ${isProd})`);
     res.cookie('accessToken', accessToken, {
       ...cookieOptions,
-      maxAge: 15 * 60 * 1000 // 15 minutes
+      maxAge: 24 * 60 * 60 * 1000 // 1 day
     });
 
     res.cookie('refreshToken', refreshToken, {
@@ -373,14 +372,14 @@ export const refreshAccessToken = async (req, res) => {
 
     const user = await User.findOne({ refreshToken });
     if (!user) {
-      console.warn("Refresh failed: Token not found in database.");
+      console.warn(`[AUTH] Refresh failed: Token not found in DB. Token provided: ${refreshToken?.substring(0, 10)}...`);
       return res.status(403).json({ success: false, message: "Invalid refresh token" });
     }
 
     // Verify token
     jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET || "fallback_refresh_secret", async (err, decoded) => {
       if (err) {
-        console.error("JWT Verify Error on Refresh:", err.message);
+        console.error(`[AUTH] JWT Verify Error on Refresh: ${err.message}`);
         return res.status(401).json({ success: false, message: "Session expired. Please log in again." });
       }
       
@@ -389,18 +388,8 @@ export const refreshAccessToken = async (req, res) => {
       const accessToken = jwt.sign(
         payload,
         process.env.JWT_SECRET || "fallback_secret_key_change_in_production",
-        { expiresIn: "15m" }
+        { expiresIn: "1d" }
       );
-
-      const newRefreshToken = jwt.sign(
-        payload,
-        process.env.REFRESH_TOKEN_SECRET || "fallback_refresh_secret",
-        { expiresIn: "7d" }
-      );
-
-      // Save the new one
-      user.refreshToken = newRefreshToken;
-      await user.save();
 
       // Set the new tokens in cookies
       const isProd = process.env.NODE_ENV === 'production';
@@ -413,15 +402,10 @@ export const refreshAccessToken = async (req, res) => {
 
       res.cookie('accessToken', accessToken, {
         ...cookieOptions,
-        maxAge: 15 * 60 * 1000
+        maxAge: 24 * 60 * 60 * 1000 // 1 day
       });
 
-      res.cookie('refreshToken', newRefreshToken, {
-        ...cookieOptions,
-        maxAge: 7 * 24 * 60 * 60 * 1000
-      });
-
-      console.log(`[AUTH] Refreshed tokens for user: ${user.email}`);
+      console.log(`[AUTH] Access token refreshed for: ${user.email}`);
       res.status(200).json({
         success: true,
         message: "Token refreshed successfully"

@@ -9,6 +9,7 @@ import { fileURLToPath } from 'url'
 import { connectDB } from './config/db.js'
 import userRoutes from './routes/userRoutes.js'
 import employeeRouter from './routes/employeeRoutes.js'
+import compression from 'compression'
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -16,7 +17,7 @@ const __dirname = path.dirname(__filename);
 const app = express();
 
 app.use(helmet());
-
+app.use(compression())
 // Allow credentials for cookie-based authentication
 app.use(cors({
   origin: true, 
